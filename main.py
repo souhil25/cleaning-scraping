@@ -1,55 +1,38 @@
 from urllib.request import urlopen
 from bs4 import BeautifulSoup
-from datetime import datetime
-import random
-import pymysql
 import re
-import socket
+import string
+from collections import defaultdict
 
-MAX_PAGES = 20
+def cleanInput(input):
+    input = re.sub('\n+', " ", input)
+    input = re.sub('[[0-9]*]', " ", input)
+    input = bytes(input, "UTF-8")
+    input = input.decode("ascii", "ignore")
+    cleanInput = []
+    input = input.split(' ')
+    for item in input:
+        item = item.strip(string.punctuation)
+        if len(item) > 1 or (item.lower() == 'a' or item.lower() == 'i'):
+            cleanInput.append(item)
+    return cleanInput
 
-conn = pymysql.connect(host='127.0.0.1', user='root', passwd='0215', db='scraping')
-cur = conn.cursor()
-cur.execute("USE Wikipedia")
+def ngrams(input, n):
+    input = cleanInput(input)    
+    output = []
+    for i in range(len(input)-n+1):
+        output.append(tuple((input[i:i+n])))
+    return output
 
-random.seed(datetime.now().timestamp())
+html = urlopen("http://en.wikipedia.org/wiki/Python_(programming_language)")
+bsObj = BeautifulSoup(html, features="lxml")
+content = bsObj.find("div", {"id":"mw-content-text"}).get_text()
+ngrams_list = ngrams(content, 2)
+ngrams_counts = defaultdict(int)
+for ng in ngrams_list :
+    ngrams_counts[ng] += 1
 
-def insertPageIfNotExists(url):
-    cur.execute("SELECT * FROM pages WHERE url = %s", (url,))
-    if cur.rowcount == 0:
-        cur.execute("INSERT INTO pages (url) VALUES (%s)", (url,))
-        conn.commit()
-        return cur.lastrowid
-    else:
-        return cur.fetchone()[0]
-    
-def insertLink(fromPageId, toPageId):
-    cur.execute("SELECT * FROM links WHERE fromPageId = %s AND toPageId = %s",
-    (int(fromPageId), int(toPageId)))
-    if cur.rowcount == 0:
-        cur.execute("INSERT INTO links (fromPageId, toPageId) VALUES (%s, %s)",
-        (int(fromPageId), int(toPageId)))
-        conn.commit()
-    
-pages = set()
-def getLinks(pageUrl, recursionLevel):
-    global pages
-    if recursionLevel > 4:
-        return
-    print(f"[Lvel {recursionLevel}] Visiting: {pageUrl}")
-    if len(pages) >= MAX_PAGES:
-        print("Reached max page limit.Stooping crawl.")
-        return
-    pageId = insertPageIfNotExists(pageUrl)
-    html = urlopen("http://en.wikipedia.org"+pageUrl)
-    bsObj = BeautifulSoup(html, features="lxml")
-    for link in bsObj.find_all("a", href=re.compile("^(/wiki/)((?!:).)*$")):
-        insertLink(pageId, insertPageIfNotExists(link.attrs['href']))
-        if link.attrs['href'] not in pages:
-            newPage = link.attrs['href']
-            pages.add(newPage)
-            getLinks(newPage, recursionLevel+1)
+sorted_ngrams = dict(sorted(ngrams_counts.items(), key=lambda item: item[1], reverse=True))
+print(sorted_ngrams)
+print("2-grams count is: ", len(sorted_ngrams))
 
-getLinks("/wiki/Kevin_Bacon", 0)
-cur.close()
-conn.close()
